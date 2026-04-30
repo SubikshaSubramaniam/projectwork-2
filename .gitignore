@@ -3,4 +3,6 @@ __pycache__/
 *.pyc
 .env*
 node_modules/
-backend/src/auth.db
+backend/src/auth.dbnode_modules/ 
+*.log 
+.env 
