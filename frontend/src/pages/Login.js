@@ -1,237 +1,224 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import "../styling/login.css";
-import { isMetaMaskInstalled, requestWalletAccount } from "../web3/connectWallet";
-import { sendTx } from "../pages/TransactionUtils";
-import { FaUserShield, FaUserMd, FaUserInjured } from "react-icons/fa";
+import { API } from "../api/api";
 
 export default function Login() {
   const nav = useNavigate();
-
-  const [step, setStep] = useState("role"); // role → email → otp
-  const [role, setRole] = useState(null);
+  const hospital = localStorage.getItem("hospital") || "A";
+  const hospitalName = localStorage.getItem("hospitalName") || "Hospital A";
+  
+  const [step, setStep] = useState("form"); // form | otp
+  const [role, setRole] = useState("");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  const [message, setMessage] = useState("");
+  const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    localStorage.clear();
-  }, []);
-
-  /* ======================================================
-     STEP 0 — ROLE SELECTION
-  ====================================================== */
-  const selectRole = (r) => {
-    if (r === "admin") {
-      const pwd = prompt("Enter Admin Password");
-      if (pwd === "IamAdmin") nav("/admin");
-      else alert("Invalid admin password");
-      return;
-    }
-
-    setRole(r);
-    setStep("email");
-  };
-
-  /* ======================================================
-     STEP 1 — REQUEST OTP
-  ====================================================== */
-  const requestOtp = async () => {
-    if (!email) {
-      setMessage("Enter email");
-      return;
-    }
-
+  const sendOtp = async () => {
+    if (!email || !role) return alert("Fill email and role");
     setLoading(true);
     try {
-      await fetch("http://127.0.0.1:8000/ehr/auth/request-otp", {
-        method: "POST",
-        body: new URLSearchParams({ email }),
-      });
-
+      const form = new FormData();
+      form.append("email", email);
+      await API.post("/auth/request-otp", form);
       setStep("otp");
-      setMessage("OTP sent to your email");
-    } catch {
-      setMessage("Failed to send OTP");
+    } catch (err) {
+      alert("Failed to send OTP: " + (err.response?.data?.detail || err.message));
     } finally {
       setLoading(false);
     }
   };
 
-  /* ======================================================
-     STEP 2 — VERIFY OTP → WALLET → LOGIN / REGISTER
-  ====================================================== */
-  const verifyOtpAndContinue = async () => {
-    if (!otp) {
-      setMessage("Enter OTP");
-      return;
-    }
-
-    if (!isMetaMaskInstalled()) {
-      window.open("https://metamask.io/download/", "_blank");
-      return;
-    }
-
+  const verify = async () => {
+    if (!otp) return alert("Enter OTP");
     setLoading(true);
-
     try {
-      // 1️⃣ Verify OTP
-      const verifyRes = await fetch(
-        "http://127.0.0.1:8000/ehr/auth/verify-otp",
-        {
-          method: "POST",
-          body: new URLSearchParams({ email, otp }),
-        }
-      );
+      const form = new FormData();
+      form.append("email", email);
+      form.append("otp", otp);
+      await API.post("/auth/verify-otp", form);
 
-      const verifyData = await verifyRes.json();
-      if (!verifyRes.ok) throw new Error(verifyData.detail);
-
-      // 2️⃣ Connect wallet
-      const wallet = await requestWalletAccount();
-      if (!wallet) throw new Error("Wallet not connected");
+      if (isRegister) {
+        const regForm = new FormData();
+        regForm.append("email", email);
+        regForm.append("role", role);
+        const res = await API.post("/auth/register", regForm);
+        const pid = res.data.patient_id;
+        alert(
+          role === "patient"
+            ? `Registered! Your Patient ID is: ${pid}\nSave this — you'll need it.`
+            : "Registered successfully!"
+        );
+      } else {
+        const loginForm = new FormData();
+        loginForm.append("email", email);
+        loginForm.append("role", role);
+        await API.post("/auth/login", loginForm);
+      }
 
       localStorage.setItem("email", email);
-      localStorage.setItem("wallet", wallet);
       localStorage.setItem("role", role);
-
-      // 3️⃣ Try login
-      const loginRes = await fetch(
-        "http://127.0.0.1:8000/ehr/auth/login",
-        {
-          method: "POST",
-          body: new URLSearchParams({
-            email,
-            wallet,
-            role,
-          }),
-        }
-      );
-
-      // 4️⃣ If user not found → register
-      if (loginRes.status === 401) {
-        const regRes = await fetch(
-          "http://127.0.0.1:8000/ehr/auth/register",
-          {
-            method: "POST",
-            body: new URLSearchParams({
-              email,
-              wallet,
-              role,
-            }),
-          }
-        );
-
-        if (!regRes.ok) throw new Error("Registration failed");
-      }
-
-      else if (loginRes.status == 400){
-        throw new Error("Invalid role selected. Please select the correct role.");
-      }
-
-      // 5️⃣ Generate ECC keys (local)
-      const keyResp = await fetch("http://127.0.0.1:8000/ehr/generate-keys", {
-        method: "POST",
-      });
-      const { private_key, public_key } = await keyResp.json();
-
-      localStorage.setItem("priv", private_key);
-      localStorage.setItem("pub", public_key);
-
-      // Check on-chain registration FIRST
-const check = await fetch(
-  `http://127.0.0.1:8000/ehr/identity/registered?wallet=${wallet}`
-);
-const { registered } = await check.json();
-
-if (!registered) {
-  // Only register if NOT already registered
-  const form = new FormData();
-  form.append("public_key_hex", public_key);
-  form.append("eth_address", wallet);
-
-  const regResp = await fetch(
-    "http://127.0.0.1:8000/ehr/register",
-    {
-      method: "POST",
-      body: form,
-    }
-  );
-
-  const regData = await regResp.json();
-
-  alert("Confirm blockchain transaction in MetaMask");
-  await sendTx(regData.tx_data);
-}
       nav("/" + role);
-    } catch (e) {
-      console.error(e);
-      setMessage(e.message || "Login failed");
+    } catch (err) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
     } finally {
       setLoading(false);
     }
   };
 
-  /* ======================================================
-     UI
-  ====================================================== */
   return (
-    <div className="login-page">
-      <h1>EHR Access Portal</h1>
-      <p className="tagline">Secure Blockchain EHR</p>
+    <div style={s.page}>
+      <div style={s.card}>
+        {/* Back to hospital selection */}
+        <button onClick={() => nav("/")} style={s.backBtn}>
+          ← Change Hospital
+        </button>
 
-      {message && <p className="warning">{message}</p>}
-
-      {/* STEP 0 — ROLE */}
-      {step === "role" && (
-        <div className="role-grid">
-          <div onClick={() => selectRole("patient")} className="role-box">
-            <FaUserInjured />
-            <h3>Patient</h3>
-          </div>
-
-          <div onClick={() => selectRole("doctor")} className="role-box">
-            <FaUserMd />
-            <h3>Doctor</h3>
-          </div>
-
-          <div onClick={() => selectRole("admin")} className="role-box">
-            <FaUserShield />
-            <h3>Admin</h3>
-          </div>
+        {/* Hospital badge at top */}
+        <div style={s.hospitalBadge}>
+          🏥 {hospitalName}
         </div>
-      )}
 
-      {/* STEP 1 — EMAIL */}
-      {step === "email" && (
-        <div className="login-box">
-          <input
-            type="email"
-            placeholder={`Enter ${role} email`}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <button onClick={requestOtp} disabled={loading}>
-            Send OTP
-          </button>
-        </div>
-      )}
+        <h2 style={s.title}>
+          {isRegister ? "Create Account" : "Sign In"}
+        </h2>
 
-      {/* STEP 2 — OTP */}
-      {step === "otp" && (
-        <div className="login-box">
-          <input
-            type="text"
-            placeholder="Enter OTP"
-            value={otp}
-            onChange={(e) => setOtp(e.target.value)}
-          />
-          <button onClick={verifyOtpAndContinue} disabled={loading}>
-            Continue
-          </button>
-        </div>
-      )}
+        {step === "form" && (
+          <>
+            <div style={s.field}>
+              <label style={s.label}>Role</label>
+              <select
+                style={s.input}
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+              >
+                <option value="">Select your role</option>
+                <option value="patient">Patient</option>
+                <option value="doctor">Doctor</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+
+            <div style={s.field}>
+              <label style={s.label}>Email</label>
+              <input
+                style={s.input}
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            <label style={s.checkLabel}>
+              <input
+                type="checkbox"
+                checked={isRegister}
+                onChange={(e) => setIsRegister(e.target.checked)}
+                style={{ marginRight: 8 }}
+              />
+              New user? Register
+            </label>
+
+            <button
+              style={{ ...s.btn, opacity: loading ? 0.7 : 1 }}
+              onClick={sendOtp}
+              disabled={loading}
+            >
+              {loading ? "Sending OTP..." : "Send OTP →"}
+            </button>
+          </>
+        )}
+
+        {step === "otp" && (
+          <>
+            <p style={s.otpInfo}>
+              OTP sent to <strong>{email}</strong>
+            </p>
+            <div style={s.field}>
+              <label style={s.label}>Enter OTP</label>
+              <input
+                style={{ ...s.input, letterSpacing: 8, fontSize: 22, textAlign: "center" }}
+                maxLength={6}
+                placeholder="------"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+              />
+            </div>
+            <button
+              style={{ ...s.btn, opacity: loading ? 0.7 : 1 }}
+              onClick={verify}
+              disabled={loading}
+            >
+              {loading ? "Verifying..." : isRegister ? "Register" : "Login"}
+            </button>
+            <button style={s.ghostBtn} onClick={() => setStep("form")}>
+              ← Back
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
+
+const s = {
+  page: {
+    minHeight: "100vh",
+    background: "#f5f7ff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  card: {
+    background: "#fff",
+    padding: 30,
+    borderRadius: 12,
+    width: 350,
+    boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
+  },
+  title: {
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  field: {
+    marginBottom: 15,
+  },
+  label: {
+    display: "block",
+    marginBottom: 5,
+    fontWeight: "bold",
+  },
+  input: {
+    width: "100%",
+    padding: 8,
+    borderRadius: 6,
+    border: "1px solid #ccc",
+  },
+  btn: {
+    width: "100%",
+    padding: 10,
+    background: "#007bff",
+    color: "#fff",
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer",
+    marginTop: 10,
+  },
+  checkLabel: {
+    fontSize: 14,
+    marginBottom: 10,
+    display: "block",
+  },
+  otpInfo: {
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  hospitalBadge: {
+    background: "#e3f2fd",
+    padding: "5px 10px",
+    borderRadius: 6,
+    marginBottom: 10,
+    textAlign: "center",
+  }
+};

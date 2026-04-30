@@ -1,0 +1,12 @@
+{
+  "name": "ehr-contract",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "fabric-chaincode-node server --chaincode-address=$CHAINCODE_ADDRESS --chaincode-id=$CHAINCODE_ID"
+  },
+  "dependencies": {
+    "fabric-contract-api": "^2.5.3",
+    "fabric-shim": "^2.5.3"
+  }
+}

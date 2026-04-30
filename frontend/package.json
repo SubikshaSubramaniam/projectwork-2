@@ -10,6 +10,7 @@
     "axios": "^1.13.1",
     "ethers": "^6.15.0",
     "framer-motion": "^12.23.24",
+    "language-subtag-registry": "^0.4.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",

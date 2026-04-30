@@ -19,16 +19,14 @@ def download_from_ipfs_bytes(cid: str, ipfs_gateway="http://127.0.0.1:8080/ipfs/
     """
     Download encrypted bytes from IPFS, decrypt in-memory, return decrypted bytes.
     """
-
     url = f"{ipfs_gateway}{cid}"
-    resp = requests.get(url, timeout=60)
+    resp = requests.get(url, allow_redirects=True, timeout=60)  # ← added allow_redirects
 
     if resp.status_code == 200:
         encrypted_bytes = resp.content
         print("RAW:", encrypted_bytes[:100])
         decrypted_bytes = decrypt_bytes(encrypted_bytes)
         print(decrypted_bytes[:100])
-
         return decrypted_bytes
     else:
         raise Exception(f"IPFS download failed: {resp.status_code} {resp.text}")

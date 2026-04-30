@@ -21,6 +21,51 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+
+# ── Fabric API Integration ──────────────────────────────────────
+FABRIC_API = os.getenv("FABRIC_API_URL", "http://localhost:4000")
+
+# Hospital name to MSP mapping
+HOSPITAL_MSP = {
+    "hospitala": "Org1MSP",
+    "hospitalb": "Org2MSP",
+    "hospitalc": "Org3MSP",
+    "hospitald": "Org4MSP"
+}
+
+def notify_fabric_election(elected_hospital: str):
+    """
+    After DQN elects a leader, store it on Fabric blockchain.
+    """
+    org_msp = HOSPITAL_MSP.get(elected_hospital.lower(), "Org1MSP")
+    try:
+        res = requests.post(
+            f"{FABRIC_API}/api/leader/elect",
+            json={"orgMSP": org_msp},
+            timeout=10
+        )
+        data = res.json()
+        print(f"\n  🔗  FABRIC: Leader {data.get('electedLeader')} stored on blockchain")
+        print(f"      Elected by: {data.get('electedBy')}")
+        return data
+    except Exception as e:
+        print(f"\n  ⚠️  FABRIC: Could not store election on blockchain: {e}")
+        return None
+
+def get_fabric_leader():
+    """
+    Check current leader stored on blockchain.
+    """
+    try:
+        res = requests.get(
+            f"{FABRIC_API}/api/leader",
+            params={"orgMSP": "Org1MSP"},
+            timeout=10
+        )
+        return res.json()
+    except Exception as e:
+        return {"error": str(e)}
+
 # ── Settings ───────────────────────────────────────────────────
 PROMETHEUS = os.getenv("PROMETHEUS_URL", "http://prometheus:9090")
 INTERVAL   = int(os.getenv("ELECTION_INTERVAL", "30"))
@@ -375,6 +420,17 @@ def main():
 
         agent.prev_s = state
         agent.prev_a = action
+
+        # Store election result on Fabric blockchain
+        elected_hospital = HOSPITALS[action]
+        notify_fabric_election(elected_hospital)
+
+        # Show current blockchain leader
+        fabric_leader = get_fabric_leader()
+        if fabric_leader.get("active"):
+            print(f"\n  📦  BLOCKCHAIN LEADER: {fabric_leader.get('leader')}")
+            print(f"      Elected at: {fabric_leader.get('electedAt')}")
+
         time.sleep(INTERVAL)
 
 
